@@ -47,7 +47,7 @@ passport.deserializeUser((user, done) => done(null, user));
 passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  callbackURL: "/auth/google/callback"
+  callbackURL: process.env.GOOGLE_CALLBACK_URL // ✅ absolute URL from .env
 }, async (accessToken, refreshToken, profile, done) => {
   const user = {
     googleId: profile.id,
@@ -61,11 +61,14 @@ passport.use(new GoogleStrategy({
 // ✅ Google auth routes
 app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 
-app.get('/auth/google/callback', passport.authenticate('google', { failureRedirect: '/login-failure', session: true }), (req, res) => {
-  const user = req.user;
-  res.redirect(`${process.env.FRONTEND_URL}/google-login-success?name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email)}&avatar=${encodeURIComponent(user.avatar)}`);
+app.get('/auth/google/callback', 
+  passport.authenticate('google', { failureRedirect: '/login-failure', session: true }), 
+  (req, res) => {
+    const user = req.user;
+    res.redirect(`${process.env.FRONTEND_URL}/google-login-success?name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email)}&avatar=${encodeURIComponent(user.avatar)}`);
 });
 
+// ✅ Login failure route
 app.get('/login-failure', (req, res) => res.send('Login failed'));
 
 // ✅ API routes
