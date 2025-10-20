@@ -14,66 +14,61 @@ dotenv.config({ path: './config.env' });
 const app = express();
 app.use(express.json());
 
-// ✅ Enable CORS for frontend
+// ✅ CORS for both local dev and deployed frontend
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://eat-fit-flame.vercel.app"
+];
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL, // from .env
+  origin: allowedOrigins,
   credentials: true
 }));
 
-// ✅ Express session (using SESSION_SECRET from .env)
+// ✅ Express session
 app.use(session({
-  secret: process.env.SESSION_SECRET,  // ✅ use env secret here
+  secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === "production", // only HTTPS in prod
+    secure: process.env.NODE_ENV === "production",
     sameSite: process.env.NODE_ENV === "production" ? "none" : "lax"
   }
 }));
 
-// ✅ Initialize passport
+// ✅ Passport
 app.use(passport.initialize());
 app.use(passport.session());
 
-// ✅ Serialize & Deserialize user
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((user, done) => done(null, user));
 
 // ✅ Google OAuth Strategy
-passport.use(new GoogleStrategy(
-  {
-    clientID: process.env.GOOGLE_CLIENT_ID,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: "/auth/google/callback" // same as set in Google Cloud console
-  },
-  async (accessToken, refreshToken, profile, done) => {
-    const user = {
-      googleId: profile.id,
-      name: profile.displayName,
-      email: profile.emails[0].value,
-      avatar: profile.photos[0].value
-    };
-    return done(null, user);
-  }
-));
+passport.use(new GoogleStrategy({
+  clientID: process.env.GOOGLE_CLIENT_ID,
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  callbackURL: "/auth/google/callback"
+}, async (accessToken, refreshToken, profile, done) => {
+  const user = {
+    googleId: profile.id,
+    name: profile.displayName,
+    email: profile.emails[0].value,
+    avatar: profile.photos[0].value
+  };
+  return done(null, user);
+}));
 
-// ✅ Google Auth Routes
+// ✅ Google auth routes
 app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 
-app.get(
-  '/auth/google/callback',
-  passport.authenticate('google', { failureRedirect: '/login-failure', session: true }),
-  (req, res) => {
-    const user = req.user;
-    res.redirect(
-      `${process.env.FRONTEND_URL}/google-login-success?name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email)}&avatar=${encodeURIComponent(user.avatar)}`
-    );
-  }
-);
+app.get('/auth/google/callback', passport.authenticate('google', { failureRedirect: '/login-failure', session: true }), (req, res) => {
+  const user = req.user;
+  res.redirect(`${process.env.FRONTEND_URL}/google-login-success?name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email)}&avatar=${encodeURIComponent(user.avatar)}`);
+});
 
 app.get('/login-failure', (req, res) => res.send('Login failed'));
 
-// ✅ Your API routes
+// ✅ API routes
 app.use('/api/orders', require('./Routes/orderRoutes'));
 app.use('/api', require('./Routes/CreateUser'));
 app.use('/api', require('./Routes/DisplayData'));
@@ -89,8 +84,9 @@ mongoDB()
 
     const io = new Server(server, {
       cors: {
-        origin: process.env.FRONTEND_URL,
-        methods: ['GET', 'POST']
+        origin: allowedOrigins,
+        methods: ['GET', 'POST'],
+        credentials: true
       }
     });
 
