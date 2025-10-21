@@ -86,6 +86,27 @@ app.get('/auth/google/callback',
     res.redirect(`${process.env.FRONTEND_URL}/google-login-success?name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email)}&avatar=${encodeURIComponent(user.avatar)}`);
   }
 );
+// ✅ Google Auth routes
+app.get(
+  '/auth/google',
+  passport.authenticate('google', { 
+    scope: ['profile', 'email'],
+    prompt: 'select_account' // ✅ Forces user to choose or sign in again every time
+  })
+);
+
+app.get(
+  '/auth/google/callback',
+  passport.authenticate('google', { failureRedirect: '/login-failure', session: true }),
+  (req, res) => {
+    const user = req.user;
+    res.redirect(
+      `${process.env.FRONTEND_URL}/google-login-success?name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email)}&avatar=${encodeURIComponent(user.avatar)}`
+    );
+  }
+);
+
+
 
 app.get('/login-failure', (req, res) => res.send('Login failed'));
 
