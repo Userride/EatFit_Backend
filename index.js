@@ -1,4 +1,3 @@
-// server.js
 const express = require('express');
 const dotenv = require('dotenv');
 const mongoDB = require('./db');
@@ -8,13 +7,14 @@ const { Server } = require('socket.io');
 const passport = require('passport');
 const session = require('express-session');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const User = require('./models/User'); // ✅ Import User model
 
 dotenv.config({ path: './config.env' });
 
 const app = express();
 app.use(express.json());
 
-// ✅ CORS for both local dev and deployed frontend
+// ✅ CORS setup
 const allowedOrigins = [
   "http://localhost:3000",
   "https://eat-fit-flame.vercel.app"
@@ -25,7 +25,7 @@ app.use(cors({
   credentials: true
 }));
 
-// ✅ Express session
+// ✅ Session middleware
 app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
@@ -36,39 +36,57 @@ app.use(session({
   }
 }));
 
-// ✅ Passport
+// ✅ Passport setup
 app.use(passport.initialize());
 app.use(passport.session());
 
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((user, done) => done(null, user));
 
-// ✅ Google OAuth Strategy
+// ✅ Google OAuth Strategy with DB integration
 passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  callbackURL: process.env.GOOGLE_CALLBACK_URL // ✅ absolute URL from .env
-}, async (accessToken, refreshToken, profile, done) => {
-  const user = {
-    googleId: profile.id,
-    name: profile.displayName,
-    email: profile.emails[0].value,
-    avatar: profile.photos[0].value
-  };
-  return done(null, user);
+  callbackURL: process.env.GOOGLE_CALLBACK_URL
+}, 
+async (accessToken, refreshToken, profile, done) => {
+  try {
+    // Check if user exists
+    let user = await User.findOne({ email: profile.emails[0].value });
+
+    if (!user) {
+      // Create new user
+      user = await User.create({
+        name: profile.displayName,
+        email: profile.emails[0].value,
+        password: '',
+        location: '',
+        googleId: profile.id,
+        avatar: profile.photos[0].value
+      });
+      console.log('✅ New Google user created:', user.email);
+    } else {
+      console.log('✅ Existing user logged in:', user.email);
+    }
+
+    return done(null, user);
+  } catch (err) {
+    console.error("❌ Google Auth Error:", err);
+    return done(err, null);
+  }
 }));
 
-// ✅ Google auth routes
+// ✅ Google Auth routes
 app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 
-app.get('/auth/google/callback', 
-  passport.authenticate('google', { failureRedirect: '/login-failure', session: true }), 
+app.get('/auth/google/callback',
+  passport.authenticate('google', { failureRedirect: '/login-failure', session: true }),
   (req, res) => {
     const user = req.user;
     res.redirect(`${process.env.FRONTEND_URL}/google-login-success?name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email)}&avatar=${encodeURIComponent(user.avatar)}`);
-});
+  }
+);
 
-// ✅ Login failure route
 app.get('/login-failure', (req, res) => res.send('Login failed'));
 
 // ✅ API routes
@@ -79,7 +97,7 @@ app.use('/api', require('./Routes/DisplayData'));
 // ✅ Test route
 app.get('/', (req, res) => res.send('🚀 EatFit Server Running'));
 
-// ✅ Database + Socket.io
+// ✅ Connect MongoDB + Socket.io
 mongoDB()
   .then(() => {
     const port = process.env.PORT || 5000;
