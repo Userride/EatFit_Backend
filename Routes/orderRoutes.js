@@ -2,10 +2,9 @@ const express = require('express');
 const router = express.Router();
 const Order = require('../models/orderModel');
 
-// Create order
+// ✅ Create order
 router.post('/createOrder', async (req, res) => {
   const { userId, cartItems, address, paymentMethod } = req.body;
-
   if (!userId || !cartItems || !address || !paymentMethod) {
     return res.status(400).json({ message: 'Missing required fields' });
   }
@@ -13,7 +12,6 @@ router.post('/createOrder', async (req, res) => {
   try {
     const newOrder = new Order({ userId, cartItems, address, paymentMethod });
     await newOrder.save();
-
     console.log('✅ New order created:', newOrder._id);
     res.status(201).json({ message: 'Order created successfully', orderId: newOrder._id });
   } catch (err) {
@@ -22,7 +20,7 @@ router.post('/createOrder', async (req, res) => {
   }
 });
 
-// Update order status
+// ✅ Update order status
 router.post('/updateStatus/:id', async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
@@ -33,18 +31,16 @@ router.post('/updateStatus/:id', async (req, res) => {
     const updatedOrder = await Order.findByIdAndUpdate(id, { status }, { new: true });
     if (!updatedOrder) return res.status(404).json({ message: 'Order not found' });
 
-    // Emit live update
     const io = req.app.get('io');
     io.to(id).emit('orderStatusUpdate', { orderId: id, status });
 
-    console.log(`🚚 Order ${id} status updated to: ${status}`);
     res.json({ message: 'Status updated', order: updatedOrder });
   } catch (err) {
     res.status(500).json({ message: 'Error updating status', error: err.message });
   }
 });
 
-// Get order by ID
+// ✅ Get order by ID
 router.get('/:id', async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
@@ -52,6 +48,16 @@ router.get('/:id', async (req, res) => {
     res.json({ order });
   } catch (err) {
     res.status(500).json({ message: 'Error fetching order', error: err.message });
+  }
+});
+
+// ✅ NEW: Get all orders of a user
+router.get('/getUserOrders/:userId', async (req, res) => {
+  try {
+    const orders = await Order.find({ userId: req.params.userId }).sort({ createdAt: -1 });
+    res.json({ orders });
+  } catch (err) {
+    res.status(500).json({ message: 'Error fetching orders', error: err.message });
   }
 });
 
