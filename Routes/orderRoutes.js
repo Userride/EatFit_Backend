@@ -1,78 +1,71 @@
-import React, { useEffect, useState } from "react";
-import axios from "axios";
+const express = require('express');
+const router = express.Router();
+const Order = require('../models/orderModel');
 
-export default function MyOrders() {
-  const [orders, setOrders] = useState([]);
-  const userId = localStorage.getItem("userId"); // Make sure userId is saved in localStorage after login
+// Create order
+router.post('/createOrder', async (req, res) => {
+  const { userId, cartItems, address, paymentMethod } = req.body;
 
-  useEffect(() => {
-    const fetchOrders = async () => {
-      if (!userId) return;
+  if (!userId || !cartItems || !address || !paymentMethod) {
+    return res.status(400).json({ message: 'Missing required fields' });
+  }
 
-      try {
-        const res = await axios.get(`https://eatfit-ecwm.onrender.com/api/orders/myOrders/${userId}`);
-        setOrders(res.data.orders || []);
-      } catch (err) {
-        console.error(err);
-        alert("Error fetching your orders");
-      }
-    };
+  try {
+    const newOrder = new Order({ userId, cartItems, address, paymentMethod });
+    await newOrder.save();
 
-    fetchOrders();
-  }, [userId]);
+    console.log('✅ New order created:', newOrder._id);
+    res.status(201).json({ message: 'Order created successfully', orderId: newOrder._id });
+  } catch (err) {
+    console.error('❌ Error creating order:', err);
+    res.status(500).json({ message: 'Error creating order', error: err.message });
+  }
+});
 
-  const getTotalPrice = (cartItems) => {
-    return cartItems.reduce((sum, item) => sum + item.price * item.qty, 0);
-  };
+// Update order status
+router.post('/updateStatus/:id', async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
 
-  if (!userId) return <p className="m-3">Please login to see your orders.</p>;
+  if (!status) return res.status(400).json({ message: 'Status is required' });
 
-  return (
-    <div className="container mt-4">
-      <h2 className="mb-4">My Orders</h2>
+  try {
+    const updatedOrder = await Order.findByIdAndUpdate(id, { status }, { new: true });
+    if (!updatedOrder) return res.status(404).json({ message: 'Order not found' });
 
-      {orders.length === 0 ? (
-        <p>You have no past orders.</p>
-      ) : (
-        orders.map((order) => (
-          <div key={order._id} className="card mb-4 shadow-sm">
-            <div className="card-header">
-              <strong>Order ID:</strong> {order._id} <br />
-              <strong>Status:</strong> {order.status} <br />
-              <strong>Payment:</strong> {order.paymentMethod} <br />
-              <strong>Address:</strong> {order.address} <br />
-              <strong>Ordered At:</strong> {new Date(order.createdAt).toLocaleString()}
-            </div>
-            <div className="card-body">
-              <h5 className="card-title">Items:</h5>
-              <table className="table table-bordered">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Qty</th>
-                    <th>Size</th>
-                    <th>Price</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {order.cartItems.map((item, i) => (
-                    <tr key={i}>
-                      <td>{item.name}</td>
-                      <td>{item.qty}</td>
-                      <td>{item.size}</td>
-                      <td>₹{item.price * item.qty}</td>
-                    </tr>
-                  ))}
-                  <tr>
-                    <td colSpan="3" style={{ textAlign: "right", fontWeight: "bold" }}>Total:</td>
-                    <td style={{ fontWeight: "bold" }}>₹{getTotalPrice(order.cartItems)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ))
-      )}
-    </div>
-  );
-}
+    const io = req.app.get('io'); // If using socket.io
+    if (io) io.to(id).emit('orderStatusUpdate', { orderId: id, status });
+
+    console.log(`🚚 Order ${id} status updated to: ${status}`);
+    res.json({ message: 'Status updated', order: updatedOrder });
+  } catch (err) {
+    res.status(500).json({ message: 'Error updating status', error: err.message });
+  }
+});
+
+// Get order by ID
+router.get('/:id', async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+    res.json({ order });
+  } catch (err) {
+    res.status(500).json({ message: 'Error fetching order', error: err.message });
+  }
+});
+
+// Get all orders for a specific user
+router.get('/myOrders/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  if (!userId) return res.status(400).json({ message: 'User ID is required' });
+
+  try {
+    const orders = await Order.find({ userId }).sort({ createdAt: -1 }); // latest first
+    res.json({ orders });
+  } catch (err) {
+    res.status(500).json({ message: 'Error fetching orders', error: err.message });
+  }
+});
+
+module.exports = router;
