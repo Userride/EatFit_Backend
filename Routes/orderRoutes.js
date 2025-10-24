@@ -54,5 +54,19 @@ router.get('/:id', async (req, res) => {
     res.status(500).json({ message: 'Error fetching order', error: err.message });
   }
 });
+// Get all orders for a specific user
+router.get('/myOrders/:userId', async (req, res) => {
+  const { userId } = req.params;
+
+  if (!userId) return res.status(400).json({ message: 'User ID is required' });
+
+  try {
+    const orders = await Order.find({ userId }).sort({ createdAt: -1 }); // latest first
+    res.json({ orders });
+  } catch (err) {
+    res.status(500).json({ message: 'Error fetching orders', error: err.message });
+  }
+});
+
 
 module.exports = router;
