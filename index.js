@@ -8,11 +8,10 @@ const passport = require('passport');
 const session = require('express-session');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const User = require('./models/User');
-const jwt = require('jsonwebtoken'); // <-- *** 1. IMPORT JWT ***
+const jwt = require('jsonwebtoken'); 
 
 dotenv.config({ path: './config.env' });
 
-// --- *** 2. DEFINE YOUR JWT SECRET (Must match userRoutes.js) *** ---
 const JWT_SECRET = process.env.JWT_SECRET || 'qwertyuiopasdfghjklzxcvbnbnm'; 
 
 const app = express();
@@ -21,12 +20,11 @@ app.use(express.json());
 // ✅ CORS setup
 const allowedOrigins = [
   "http://localhost:3000",
-  "https://eat-fit-flame.vercel.app"
+  "https.eat-fit-flame.vercel.app"
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) === -1) {
       const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
@@ -38,6 +36,7 @@ app.use(cors({
 }));
 
 // ✅ Session middleware
+// (Note: The MemoryStore warning is normal for development. For production, you'd use a different store)
 app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
@@ -55,7 +54,7 @@ app.use(passport.session());
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((user, done) => done(null, user));
 
-// ✅ Google OAuth Strategy with DB integration
+// ✅ Google OAuth Strategy
 passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
@@ -63,15 +62,13 @@ passport.use(new GoogleStrategy({
 }, 
 async (accessToken, refreshToken, profile, done) => {
   try {
-    // Check if user exists
     let user = await User.findOne({ email: profile.emails[0].value });
 
     if (!user) {
-      // Create new user
       user = await User.create({
         name: profile.displayName,
         email: profile.emails[0].value,
-        password: '', // No password for OAuth users
+        password: '', 
         location: '',
         googleId: profile.id,
         avatar: profile.photos[0].value
@@ -81,7 +78,7 @@ async (accessToken, refreshToken, profile, done) => {
       console.log('✅ Existing user logged in:', user.email);
     }
 
-    return done(null, user); // user object (from DB) is passed to req.user
+    return done(null, user);
   } catch (err) {
     console.error("❌ Google Auth Error:", err);
     return done(err, null);
@@ -97,40 +94,30 @@ app.get(
   })
 );
 
-// --- *** 3. THIS IS THE CORRECTED CALLBACK *** ---
+// ✅ Google Auth callback
 app.get(
   '/auth/google/callback',
   passport.authenticate('google', { failureRedirect: '/login-failure', session: true }),
   (req, res) => {
-    // req.user is now the full user object from our database
     const user = req.user;
-
-    // Create a JWT payload just like in your email login
-    const data = {
-      user: {
-        id: user.id // or user._id
-      }
-    };
-
-    // Sign the token
+    const data = { user: { id: user.id } };
     const authToken = jwt.sign(data, JWT_SECRET);
-    const userId = user.id; // or user._id
+    const userId = user.id;
 
-    // Redirect to the frontend with the REAL authToken and userId
     res.redirect(
       `${process.env.FRONTEND_URL}/google-login-success?authToken=${authToken}&userId=${userId}`
     );
   }
 );
-// --------------------------------------------------
 
 app.get('/login-failure', (req, res) => res.send('Login failed'));
 
-// ✅ API routes
-// (Assuming your CreateUser.js file is actually named userRoutes.js)
+// --- *** THIS IS THE FIX *** ---
+// Changed './Routes/userRoutes' back to './Routes/CreateUser' to match your file name
 app.use('/api/orders', require('./Routes/orderRoutes'));
-app.use('/api', require('./Routes/userRoutes')); // Using the file you provided
+app.use('/api', require('./Routes/CreateUser')); 
 app.use('/api', require('./Routes/DisplayData'));
+// -------------------------------
 
 // ✅ Test route
 app.get('/', (req, res) => res.send('🚀 EatFit Server Running'));
