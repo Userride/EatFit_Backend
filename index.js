@@ -14,7 +14,7 @@ dotenv.config({ path: './config.env' });
 const app = express();
 app.use(express.json());
 
-// ✅ Allowed origins
+// ✅ CORS setup
 const allowedOrigins = [
   "http://localhost:3000",
   "https://eat-fit-flame.vercel.app"
@@ -43,14 +43,16 @@ app.use(passport.session());
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((user, done) => done(null, user));
 
-// ✅ Google OAuth
+// ✅ Google OAuth Strategy with DB integration
 passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
   callbackURL: process.env.GOOGLE_CALLBACK_URL
-}, async (accessToken, refreshToken, profile, done) => {
+}, 
+async (accessToken, refreshToken, profile, done) => {
   try {
     let user = await User.findOne({ email: profile.emails[0].value });
+
     if (!user) {
       user = await User.create({
         name: profile.displayName,
@@ -61,7 +63,10 @@ passport.use(new GoogleStrategy({
         avatar: profile.photos[0].value
       });
       console.log('✅ New Google user created:', user.email);
+    } else {
+      console.log('✅ Existing user logged in:', user.email);
     }
+
     return done(null, user);
   } catch (err) {
     console.error("❌ Google Auth Error:", err);
@@ -69,28 +74,35 @@ passport.use(new GoogleStrategy({
   }
 }));
 
-app.get('/auth/google',
-  passport.authenticate('google', { scope: ['profile', 'email'], prompt: 'select_account' })
-);
+// ✅ Google Auth routes
+app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'], prompt: 'select_account' }));
 
-app.get('/auth/google/callback',
+app.get(
+  '/auth/google/callback',
   passport.authenticate('google', { failureRedirect: '/login-failure', session: true }),
   (req, res) => {
     const user = req.user;
-    res.redirect(`${process.env.FRONTEND_URL}/google-login-success?name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email)}&avatar=${encodeURIComponent(user.avatar)}`);
+    // ✅ Include userId in redirect URL
+    res.redirect(
+      `${process.env.FRONTEND_URL}/google-login-success?` +
+      `name=${encodeURIComponent(user.name)}&` +
+      `email=${encodeURIComponent(user.email)}&` +
+      `avatar=${encodeURIComponent(user.avatar)}&` +
+      `userId=${encodeURIComponent(user._id)}`
+    );
   }
 );
 
 app.get('/login-failure', (req, res) => res.send('Login failed'));
 
-// ✅ Routes
+// ✅ API routes
 app.use('/api/orders', require('./Routes/orderRoutes'));
 app.use('/api', require('./Routes/CreateUser'));
 app.use('/api', require('./Routes/DisplayData'));
 
 app.get('/', (req, res) => res.send('🚀 EatFit Server Running'));
 
-// ✅ MongoDB + Socket.io integration
+// ✅ Connect MongoDB + Socket.io
 mongoDB()
   .then(() => {
     const port = process.env.PORT || 5000;
@@ -108,15 +120,11 @@ mongoDB()
 
     io.on('connection', (socket) => {
       console.log('✅ Client connected:', socket.id);
-
-      socket.on('join_order', (orderId) => {
-        socket.join(orderId);
-        console.log(`📦 User joined room: ${orderId}`);
-      });
-
+      socket.on('join_order', (orderId) => socket.join(orderId));
       socket.on('disconnect', () => console.log('❌ Client disconnected:', socket.id));
     });
 
     server.listen(port, () => console.log(`✅ Server running on port ${port}`));
   })
-  .catch(err => console.error("❌ DB connection failed:", err));
+  .catch((err) => console.error("❌ DB connection failed:", err));
+
