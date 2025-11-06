@@ -7,9 +7,13 @@ const { Server } = require('socket.io');
 const passport = require('passport');
 const session = require('express-session');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
-const User = require('./models/User'); // ✅ Import User model
+const User = require('./models/User');
+const jwt = require('jsonwebtoken'); // <-- *** 1. IMPORT JWT ***
 
 dotenv.config({ path: './config.env' });
+
+// --- *** 2. DEFINE YOUR JWT SECRET (Must match userRoutes.js) *** ---
+const JWT_SECRET = process.env.JWT_SECRET || 'qwertyuiopasdfghjklzxcvbnbnm'; 
 
 const app = express();
 app.use(express.json());
@@ -21,7 +25,15 @@ const allowedOrigins = [
 ];
 
 app.use(cors({
-  origin: allowedOrigins,
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
   credentials: true
 }));
 
@@ -59,7 +71,7 @@ async (accessToken, refreshToken, profile, done) => {
       user = await User.create({
         name: profile.displayName,
         email: profile.emails[0].value,
-        password: '',
+        password: '', // No password for OAuth users
         location: '',
         googleId: profile.id,
         avatar: profile.photos[0].value
@@ -69,7 +81,7 @@ async (accessToken, refreshToken, profile, done) => {
       console.log('✅ Existing user logged in:', user.email);
     }
 
-    return done(null, user);
+    return done(null, user); // user object (from DB) is passed to req.user
   } catch (err) {
     console.error("❌ Google Auth Error:", err);
     return done(err, null);
@@ -77,42 +89,47 @@ async (accessToken, refreshToken, profile, done) => {
 }));
 
 // ✅ Google Auth routes
-app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
-
-app.get('/auth/google/callback',
-  passport.authenticate('google', { failureRedirect: '/login-failure', session: true }),
-  (req, res) => {
-    const user = req.user;
-    res.redirect(`${process.env.FRONTEND_URL}/google-login-success?name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email)}&avatar=${encodeURIComponent(user.avatar)}`);
-  }
-);
-// ✅ Google Auth routes
 app.get(
   '/auth/google',
   passport.authenticate('google', { 
     scope: ['profile', 'email'],
-    prompt: 'select_account' // ✅ Forces user to choose or sign in again every time
+    prompt: 'select_account' 
   })
 );
 
+// --- *** 3. THIS IS THE CORRECTED CALLBACK *** ---
 app.get(
   '/auth/google/callback',
   passport.authenticate('google', { failureRedirect: '/login-failure', session: true }),
   (req, res) => {
+    // req.user is now the full user object from our database
     const user = req.user;
+
+    // Create a JWT payload just like in your email login
+    const data = {
+      user: {
+        id: user.id // or user._id
+      }
+    };
+
+    // Sign the token
+    const authToken = jwt.sign(data, JWT_SECRET);
+    const userId = user.id; // or user._id
+
+    // Redirect to the frontend with the REAL authToken and userId
     res.redirect(
-      `${process.env.FRONTEND_URL}/google-login-success?name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email)}&avatar=${encodeURIComponent(user.avatar)}`
+      `${process.env.FRONTEND_URL}/google-login-success?authToken=${authToken}&userId=${userId}`
     );
   }
 );
-
-
+// --------------------------------------------------
 
 app.get('/login-failure', (req, res) => res.send('Login failed'));
 
 // ✅ API routes
+// (Assuming your CreateUser.js file is actually named userRoutes.js)
 app.use('/api/orders', require('./Routes/orderRoutes'));
-app.use('/api', require('./Routes/CreateUser'));
+app.use('/api', require('./Routes/userRoutes')); // Using the file you provided
 app.use('/api', require('./Routes/DisplayData'));
 
 // ✅ Test route
