@@ -43,13 +43,31 @@ router.post('/updateStatus/:id', async (req, res) => {
   }
 });
 
-// Get order by ID
+// Get order by ID (SECURED)
 router.get('/:id', async (req, res) => {
   try {
+    // *** FIX: Get the logged-in userId from the query ***
+    const { userId } = req.query;
+    if (!userId) {
+      return res.status(401).json({ message: 'Authentication required.' });
+    }
+
     const order = await Order.findById(req.params.id);
-    if (!order) return res.status(404).json({ message: 'Order not found' });
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    // *** FIX: Check if the order belongs to the user ***
+    // Note: We use .toString() to compare Mongoose ObjectIDs
+    if (order.userId.toString() !== userId) {
+      return res.status(403).json({ message: 'Not authorized to view this order.' });
+    }
+
+    // If checks pass, send the order
     res.json({ order });
+
   } catch (err) {
+    console.error('Error fetching order:', err.message);
     res.status(500).json({ message: 'Error fetching order', error: err.message });
   }
 });
