@@ -7,14 +7,14 @@ const { Server } = require('socket.io');
 const passport = require('passport');
 const session = require('express-session');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
-const User = require('./models/User');
+const User = require('./models/User'); // ✅ Import User model
 
 dotenv.config({ path: './config.env' });
 
 const app = express();
 app.use(express.json());
 
-// ✅ CORS setup
+// ✅ Allowed frontend URLs
 const allowedOrigins = [
   "http://localhost:3000",
   "https://eat-fit-flame.vercel.app"
@@ -25,9 +25,9 @@ app.use(cors({
   credentials: true
 }));
 
-// ✅ Session setup
+// ✅ Express session setup
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'supersecretkey',
+  secret: process.env.SESSION_SECRET || 'supersecret',
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -36,14 +36,16 @@ app.use(session({
   }
 }));
 
-// ✅ Passport setup
+// ✅ Initialize passport
 app.use(passport.initialize());
 app.use(passport.session());
 
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((user, done) => done(null, user));
 
-// ✅ Google OAuth Strategy with DB integration
+/* ----------------------------------------------------------------
+   ✅ FIXED GOOGLE OAUTH STRATEGY — Reuses same MongoDB user if email exists
+------------------------------------------------------------------ */
 passport.use(new GoogleStrategy({
   clientID: process.env.GOOGLE_CLIENT_ID,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
@@ -51,20 +53,28 @@ passport.use(new GoogleStrategy({
 }, 
 async (accessToken, refreshToken, profile, done) => {
   try {
+    // 🧠 Find user by email first
     let user = await User.findOne({ email: profile.emails[0].value });
 
     if (!user) {
+      // ✅ Create only if user doesn’t exist
       user = await User.create({
         name: profile.displayName,
         email: profile.emails[0].value,
-        password: '',
+        password: '', // not needed for Google
         location: '',
         googleId: profile.id,
         avatar: profile.photos[0].value
       });
       console.log('✅ New Google user created:', user.email);
     } else {
-      console.log('✅ Existing user logged in:', user.email);
+      // ✅ If same email user exists (from normal signup), update googleId
+      if (!user.googleId) {
+        user.googleId = profile.id;
+        user.avatar = profile.photos[0].value;
+        await user.save();
+      }
+      console.log('✅ Existing user reused:', user.email);
     }
 
     return done(null, user);
@@ -74,35 +84,57 @@ async (accessToken, refreshToken, profile, done) => {
   }
 }));
 
-// ✅ Google Auth routes
-app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'], prompt: 'select_account' }));
+/* ----------------------------------------------------------------
+   ✅ GOOGLE AUTH ROUTES
+------------------------------------------------------------------ */
+app.get(
+  '/auth/google',
+  passport.authenticate('google', {
+    scope: ['profile', 'email'],
+    prompt: 'select_account'
+  })
+);
 
 app.get(
   '/auth/google/callback',
   passport.authenticate('google', { failureRedirect: '/login-failure', session: true }),
   (req, res) => {
     const user = req.user;
-    // ✅ Include userId in redirect URL
-    res.redirect(
-      `${process.env.FRONTEND_URL}/google-login-success?` +
+
+    // ✅ Send user info + userId to frontend
+    const redirectUrl = `${process.env.FRONTEND_URL}/google-login-success?` +
       `name=${encodeURIComponent(user.name)}&` +
       `email=${encodeURIComponent(user.email)}&` +
-      `avatar=${encodeURIComponent(user.avatar)}&` +
-      `userId=${encodeURIComponent(user._id)}`
-    );
+      `avatar=${encodeURIComponent(user.avatar || '')}&` +
+      `userId=${user._id.toString()}`;
+
+    console.log("✅ Google user logged in:", {
+      name: user.name,
+      email: user.email,
+      userId: user._id
+    });
+
+    res.redirect(redirectUrl);
   }
 );
 
-app.get('/login-failure', (req, res) => res.send('Login failed'));
+app.get('/login-failure', (req, res) => res.send('Google login failed'));
 
-// ✅ API routes
+/* ----------------------------------------------------------------
+   ✅ API ROUTES
+------------------------------------------------------------------ */
 app.use('/api/orders', require('./Routes/orderRoutes'));
 app.use('/api', require('./Routes/CreateUser'));
 app.use('/api', require('./Routes/DisplayData'));
 
+/* ----------------------------------------------------------------
+   ✅ TEST ROUTE
+------------------------------------------------------------------ */
 app.get('/', (req, res) => res.send('🚀 EatFit Server Running'));
 
-// ✅ Connect MongoDB + Socket.io
+/* ----------------------------------------------------------------
+   ✅ CONNECT MONGODB + SOCKET.IO SERVER
+------------------------------------------------------------------ */
 mongoDB()
   .then(() => {
     const port = process.env.PORT || 5000;
@@ -119,12 +151,18 @@ mongoDB()
     app.set('io', io);
 
     io.on('connection', (socket) => {
-      console.log('✅ Client connected:', socket.id);
-      socket.on('join_order', (orderId) => socket.join(orderId));
-      socket.on('disconnect', () => console.log('❌ Client disconnected:', socket.id));
+      console.log('✅ New client connected:', socket.id);
+
+      socket.on('join_order', (orderId) => {
+        socket.join(orderId);
+        console.log(`📦 User joined room: ${orderId}`);
+      });
+
+      socket.on('disconnect', () => {
+        console.log('❌ Client disconnected:', socket.id);
+      });
     });
 
     server.listen(port, () => console.log(`✅ Server running on port ${port}`));
   })
   .catch((err) => console.error("❌ DB connection failed:", err));
-
